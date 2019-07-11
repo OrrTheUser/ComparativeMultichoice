@@ -9,7 +9,7 @@ from overrides import overrides
 
 from allennlp.common.file_utils import cached_path
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
-from allennlp.data.fields import ArrayField, Field, TextField, LabelField
+from allennlp.data.fields import ArrayField, Field, TextField, LabelField, MultiLabelField, SequenceField
 from allennlp.data.fields import ListField, MetadataField, SequenceLabelField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
@@ -170,26 +170,36 @@ class BertMCQAReader(DatasetReader):
         # pylint: disable=arguments-differ
         fields: Dict[str, Field] = {}
 
-        qa_fields = []
+        pair_fields = []
         #TODO: remove all segment_ids references in this file - they are never referenced (the wordpiece indexer implements "bert-type-ids")
         segment_ids_fields = []
-        qa_tokens_list = []
-        for idx, choice in enumerate(choice_list):
-            choice_context = context
-            if choice_context_list is not None and choice_context_list[idx] is not None:
-                choice_context = choice_context_list[idx]
-            qa_tokens, segment_ids = self.bert_features_from_qa(question, choice, choice_context)
-            qa_field = TextField(qa_tokens, self._token_indexers)
-            segment_ids_field = SequenceLabelField(segment_ids, qa_field)
-            qa_fields.append(qa_field)
-            qa_tokens_list.append(qa_tokens)
+        pair_tokens_list = []
+        choice1_index_fields = []
+        choice2_index_fields = []
+
+        for index1, index2 in itertools.combinations(range(len(choice_list)), 2):
+            choice1, choice2 = (choice_list[index1], choice_list[index2])
+            # TODO: What to do if contexts are not none?
+            assert context is None and choice_context_list is None
+            pair_tokens, segment_ids = self.bert_features_from_q_2a(question, choice1, choice2)
+            pair_field = TextField(pair_tokens, self._token_indexers)
+            segment_ids_field = SequenceLabelField(segment_ids, pair_field)
+            choice1_index_field = LabelField(index1, skip_indexing=True)
+            choice2_index_field = LabelField(index2, skip_indexing=True)
+            pair_fields.append(pair_field)
+            pair_tokens_list.append(pair_tokens)
             segment_ids_fields.append(segment_ids_field)
+            choice1_index_fields.append(choice1_index_field)
+            choice2_index_fields.append(choice2_index_field)
             if debug > 0:
-                logger.info(f"qa_tokens = {qa_tokens}")
+                logger.info(f"qa_tokens = {pair_tokens}")
                 logger.info(f"segment_ids = {segment_ids}")
 
-        fields['question'] = ListField(qa_fields)
+        fields['question'] = ListField(pair_fields)
         fields['segment_ids'] = ListField(segment_ids_fields)
+        fields['choice1_indexes'] = ListField(choice1_index_fields)
+        fields['choice2_indexes'] = ListField(choice2_index_fields)
+
         if answer_id is not None:
             fields['label'] = LabelField(answer_id, skip_indexing=True)
 
@@ -198,7 +208,7 @@ class BertMCQAReader(DatasetReader):
             "question_text": question,
             "choice_text_list": choice_list,
             "correct_answer_index": answer_id,
-            "question_tokens_list": qa_tokens_list
+            "question_tokens_list": pair_tokens_list
         }
 
         if debug > 0:
@@ -209,29 +219,38 @@ class BertMCQAReader(DatasetReader):
         return Instance(fields)
 
     @staticmethod
-    def _truncate_tokens(tokens_a, tokens_b, max_length):
+    def _truncate_tokens(tokens_a, tokens_b, tokens_c, max_length):
         """
-        Truncate a from the start and b from the end until total is less than max_length.
+        Truncate 'a' from the start, 'b' form the start, and 'c' from the end until total is less than max_length.
         At each step, truncate the longest one
         """
-        while len(tokens_a) + len(tokens_b) > max_length:
-            if len(tokens_a) > len(tokens_b):
+        while len(tokens_a) + len(tokens_b) + len(tokens_c) > max_length:
+            reduction_candidate = numpy.argmax(len(tokens_a), len(tokens_b), len(tokens_c))
+            if reduction_candidate == 0:
+                # 'a' is the longest
                 tokens_a.pop(0)
+            elif reduction_candidate == 1:
+                # 'b' is the longest
+                tokens_b.pop(0)
             else:
-                tokens_b.pop()
-        return tokens_a, tokens_b
+                # 'c' is the longest
+                tokens_c.pop()
+        return tokens_a, tokens_b, tokens_c
 
-    def bert_features_from_qa(self, question: str, answer: str, context: str = None):
-        cls_token = Token("[CLS]")
+    def bert_features_from_q_2a(self, question: str, answer1: str, answer2: str, context: str = None):
+        #TODO: What should we do if context is not None (where to append it?)
+        assert context is None
+
         sep_token = Token("[SEP]")
         question_tokens = self._word_splitter.split_words(question)
-        if context is not None:
-            context_tokens = self._word_splitter.split_words(context)
-            question_tokens = context_tokens + [sep_token] + question_tokens
-        choice_tokens = self._word_splitter.split_words(answer)
-        question_tokens, choice_tokens = self._truncate_tokens(question_tokens, choice_tokens, self._max_pieces - 1)
 
-        tokens = question_tokens + [sep_token] + choice_tokens
-        segment_ids = list(itertools.repeat(0, len(question_tokens) + 1)) + \
-                      list(itertools.repeat(1, len(choice_tokens)))
+        choice1_tokens = self._word_splitter.split_words(answer1)
+        choice2_tokens = self._word_splitter.split_words(answer2)
+        question_tokens, choice1_tokens, choice2_tokens = self._truncate_tokens(question_tokens, choice1_tokens,
+                                                                                choice2_tokens, self._max_pieces - 2)
+
+        tokens = choice1_tokens + [sep_token] + question_tokens + [sep_token] + choice2_tokens
+        segment_ids = list(itertools.repeat(0, len(choice1_tokens))) +\
+                      list(itertools.repeat(1, len(question_tokens) + 1)) + \
+                      list(itertools.repeat(2, len(choice2_tokens)))
         return tokens, segment_ids
