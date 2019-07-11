@@ -53,6 +53,7 @@ class BertMCQAReader(DatasetReader):
                  sample: int = -1,
                  random_seed: int = 0) -> None:
         super().__init__()
+
         self._token_indexers = token_indexers or {'tokens': SingleIdTokenIndexer()}
         lower_case = not '-cased' in pretrained_model
         self._word_splitter = BertBasicWordSplitter(do_lower_case=lower_case)
@@ -170,6 +171,7 @@ class BertMCQAReader(DatasetReader):
         fields: Dict[str, Field] = {}
 
         qa_fields = []
+        #TODO: remove all segment_ids references in this file - they are never referenced (the wordpiece indexer implements "bert-type-ids")
         segment_ids_fields = []
         qa_tokens_list = []
         for idx, choice in enumerate(choice_list):
@@ -227,9 +229,9 @@ class BertMCQAReader(DatasetReader):
             context_tokens = self._word_splitter.split_words(context)
             question_tokens = context_tokens + [sep_token] + question_tokens
         choice_tokens = self._word_splitter.split_words(answer)
-        question_tokens, choice_tokens = self._truncate_tokens(question_tokens, choice_tokens, self._max_pieces - 3)
+        question_tokens, choice_tokens = self._truncate_tokens(question_tokens, choice_tokens, self._max_pieces - 1)
 
-        tokens = [cls_token] + question_tokens + [sep_token] + choice_tokens + [sep_token]
-        segment_ids = list(itertools.repeat(0, len(question_tokens) + 2)) + \
-                      list(itertools.repeat(1, len(choice_tokens) + 1))
+        tokens = question_tokens + [sep_token] + choice_tokens
+        segment_ids = list(itertools.repeat(0, len(question_tokens) + 1)) + \
+                      list(itertools.repeat(1, len(choice_tokens)))
         return tokens, segment_ids
