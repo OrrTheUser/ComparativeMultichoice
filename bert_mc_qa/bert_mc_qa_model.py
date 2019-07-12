@@ -73,24 +73,27 @@ class BertMCQAModel(Model):
             self._scalar_mix = None
 
 
-        if self._per_choice_loss:
-            self._accuracy = BooleanAccuracy()
-            self._loss = torch.nn.BCEWithLogitsLoss()
-        else:
-            self._accuracy = CategoricalAccuracy()
-            self._loss = torch.nn.CrossEntropyLoss()
+        # if self._per_choice_loss:
+        self._accuracy = BooleanAccuracy()
+        self._loss = torch.nn.BCEWithLogitsLoss()
+        # else:
+        #    self._accuracy = CategoricalAccuracy()
+        #    self._loss = torch.nn.CrossEntropyLoss()
         self._debug = -1
 
-
     def forward(self,
-                    question: Dict[str, torch.LongTensor],
-                    segment_ids: torch.LongTensor = None,
-                    label: torch.LongTensor = None,
-                    metadata: List[Dict[str, Any]] = None) -> torch.Tensor:
+                question: Dict[str, torch.LongTensor],
+                segment_ids: torch.LongTensor = None,
+                choice1_indexes: List[int] = None,
+                choice2_indexes: List[int] = None,
+                label: torch.LongTensor = None,
+                metadata: List[Dict[str, Any]] = None) -> torch.Tensor:
 
         self._debug -= 1
         input_ids = question['bert']
-        batch_size, num_choices, _  = question['bert'].size()
+
+        # input_ids.size() == (batch_size, num_pairs, max_sentence_length)
+        batch_size, num_pairs, _ = question['bert'].size()
         question_mask = (input_ids != 0).long()
         token_type_ids = torch.zeros_like(input_ids)
 
@@ -104,33 +107,30 @@ class BertMCQAModel(Model):
             pooled_output = self._bert_model.pooler(mixed_layer)
 
         pooled_output = self._dropout(pooled_output)
-        label_logits = self._classifier(pooled_output)
-        label_logits_flat = label_logits.squeeze(1)
-        label_logits = label_logits.view(-1, num_choices)
+        pair_label_logits = self._classifier(pooled_output)
+        pair_label_logits_flat = pair_label_logits.squeeze(1)
+        pair_label_logits = pair_label_logits.view(-1, num_pairs)
 
         output_dict = {}
-        output_dict['label_logits'] = label_logits
-        if self._per_choice_loss:
-            output_dict['label_probs'] = torch.sigmoid(label_logits_flat).view(-1, num_choices)
-            output_dict['answer_index'] = (label_logits_flat > 0).view(-1, num_choices)
-        else:
-            output_dict['label_probs'] = torch.nn.functional.softmax(label_logits, dim=1)
-            output_dict['answer_index'] = label_logits.argmax(1)
+        output_dict['pair_label_logits'] = pair_label_logits
+        output_dict['choice1_indexes'] = choice1_indexes
+        output_dict['choice2_indexes'] = choice2_indexes
+
+        output_dict['pair_label_probs'] = torch.sigmoid(pair_label_logits_flat).view(-1, num_pairs)
 
         if label is not None:
-            if self._per_choice_loss:
-                binary_label = label.new_zeros((len(label), num_choices))
-                binary_label.scatter_(1, label.unsqueeze(1), 1.0)
-                binary_label = binary_label.view(-1,1).squeeze(1)
-                loss = self._loss(label_logits_flat, binary_label.float())
-                self._accuracy(label_logits_flat > 0, binary_label.byte())
-            else:
-                loss = self._loss(label_logits, label)
-                self._accuracy(label_logits, label)
+            label = label.unsqueeze(1)
+            label = label.expand(-1, num_pairs)
+            relevant_pairs = (choice1_indexes == label) | (choice2_indexes == label)
+            relevant_logits = pair_label_logits[relevant_pairs]
+            choice1_is_the_label = (choice1_indexes == label)[relevant_pairs]
+            # choice1_is_the_label = choice1_is_the_label.type_as(relevant_logits)
+
+            loss = self._loss(relevant_logits, choice1_is_the_label.float())
+            self._accuracy(relevant_logits >= 0.5, choice1_is_the_label)
             output_dict["loss"] = loss
 
         return output_dict
-
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         return {
