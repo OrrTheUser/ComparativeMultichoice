@@ -103,7 +103,6 @@ class BertMCQAModel(Model):
         # TODO: This row, for some reason, didn't work as expected, but it is much better then the implementation that follows
         # last_token_tensor = encoded_layers[last_item_indices]
 
-        # TODO: This also doesn't work correctly for some reason
         num_pairs, token_number, hidden_size = encoded_layers.size()
         assert last_item_indices.size() == (num_pairs, token_number)
         # Don't worry, expand doesn't allocate new memory, it simply views the tensor differently
@@ -113,9 +112,6 @@ class BertMCQAModel(Model):
 
         pooled_output = self._bert_model.pooler.dense(last_token_tensor)
         pooled_output = self._bert_model.pooler.activation(pooled_output)
-
-        import ipdb
-        ipdb.set_trace()
 
         return pooled_output
 
@@ -143,12 +139,7 @@ class BertMCQAModel(Model):
                                             attention_mask=util.combine_initial_dims(question_mask),
                                             output_all_encoded_layers=self._all_layers)
 
-        import ipdb
-        ipdb.set_trace()
-
         last_vectors_pooled_output = self._extract_last_token_pooled_output(encoded_layers, question_mask)
-
-        ipdb.set_trace()
 
         if self._all_layers:
             mixed_layer = self._scalar_mix(encoded_layers, question_mask)
