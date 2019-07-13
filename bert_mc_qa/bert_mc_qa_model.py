@@ -156,9 +156,6 @@ class BertMCQAModel(Model):
             mixed_layer = self._scalar_mix(encoded_layers, question_mask)
             first_vectors_pooled_output = self._bert_model.pooler(mixed_layer)
 
-        import ipdb
-        ipdb.set_trace()
-
         # Apply dropout
         first_vectors_pooled_output = self._dropout(first_vectors_pooled_output)
         if self._use_comparative_bert:
@@ -171,8 +168,6 @@ class BertMCQAModel(Model):
             if self._use_bilinear_classifier:
                 pair_label_logits = self._classifier(first_vectors_pooled_output, last_vectors_pooled_output)
             else:
-                import ipdb
-                ipdb.set_trace()
                 all_pooled_output = torch.cat((first_vectors_pooled_output, last_vectors_pooled_output), 1)
                 pair_label_logits = self._classifier(all_pooled_output)
 
