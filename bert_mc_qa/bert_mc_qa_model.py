@@ -5,7 +5,7 @@ from overrides import overrides
 from pytorch_pretrained_bert.modeling import BertModel, gelu
 import re
 import torch
-from torch.nn.modules.linear import Linear
+from torch.nn.modules.linear import Linear, Bilinear
 from allennlp.modules import TextFieldEmbedder
 from allennlp.data import Vocabulary
 from allennlp.models.archival import load_archive
@@ -28,8 +28,13 @@ class BertMCQAModel(Model):
                  bert_weights_model: str = None,
                  per_choice_loss: bool = False,
                  layer_freeze_regexes: List[str] = None,
-                 regularizer: Optional[RegularizerApplicator] = None) -> None:
+                 regularizer: Optional[RegularizerApplicator] = None,
+                 use_comparative_bert: bool = True,
+                 use_bilinear_classifier: bool = False) -> None:
         super().__init__(vocab, regularizer)
+
+        self._use_comparative_bert = use_comparative_bert
+        self._use_bilinear_classifier = use_bilinear_classifier
 
         if bert_weights_model:
             logging.info(f"Loading BERT weights model from {bert_weights_model}")
@@ -50,13 +55,21 @@ class BertMCQAModel(Model):
         self._output_dim = bert_config.hidden_size
         self._dropout = torch.nn.Dropout(bert_config.hidden_dropout_prob)
         self._per_choice_loss = per_choice_loss
-        # TODO: Check dimensions before replacing
-        if bert_weights_model and hasattr(bert_model_loaded.model, "_classifier"):
-            self._classifier = bert_model_loaded.model._classifier
+
+        final_output_dim = 1
+        if not use_comparative_bert:
+            if bert_weights_model and hasattr(bert_model_loaded.model, "_classifier"):
+                self._classifier = bert_model_loaded.model._classifier
+            else:
+                self._classifier = Linear(self._output_dim, final_output_dim)
+
         else:
-            final_output_dim = 1
-            self._classifier = Linear(self._output_dim, final_output_dim)
-            self._classifier.apply(self._bert_model.init_bert_weights)
+            if use_bilinear_classifier:
+                self._classifier = Bilinear(self._output_dim, self._output_dim, final_output_dim)
+            else:
+                self._classifier = Linear(self._output_dim * 2, final_output_dim)
+        self._classifier.apply(self._bert_model.init_bert_weights)
+
         self._all_layers = not top_layer_only
         if self._all_layers:
             if bert_weights_model and hasattr(bert_model_loaded.model, "_scalar_mix") \
@@ -72,13 +85,8 @@ class BertMCQAModel(Model):
         else:
             self._scalar_mix = None
 
-
-        # if self._per_choice_loss:
         self._accuracy = BooleanAccuracy()
         self._loss = torch.nn.BCEWithLogitsLoss()
-        # else:
-        #    self._accuracy = CategoricalAccuracy()
-        #    self._loss = torch.nn.CrossEntropyLoss()
         self._debug = -1
 
     def _extract_last_token_pooled_output(self, encoded_layers, question_mask):
@@ -134,19 +142,40 @@ class BertMCQAModel(Model):
         # TODO: How to extract last token pooled output if batch size != 1
         assert batch_size == 1
 
-        encoded_layers, pooled_output = self._bert_model(input_ids=util.combine_initial_dims(input_ids),
+        # Run model
+        encoded_layers, first_vectors_pooled_output = self._bert_model(input_ids=util.combine_initial_dims(input_ids),
                                             token_type_ids=util.combine_initial_dims(token_type_ids),
                                             attention_mask=util.combine_initial_dims(question_mask),
                                             output_all_encoded_layers=self._all_layers)
 
-        last_vectors_pooled_output = self._extract_last_token_pooled_output(encoded_layers, question_mask)
-
+        if self._use_comparative_bert:
+            last_vectors_pooled_output = self._extract_last_token_pooled_output(encoded_layers, question_mask)
+        else:
+            last_vectors_pooled_output = None
         if self._all_layers:
             mixed_layer = self._scalar_mix(encoded_layers, question_mask)
-            pooled_output = self._bert_model.pooler(mixed_layer)
+            first_vectors_pooled_output = self._bert_model.pooler(mixed_layer)
 
-        pooled_output = self._dropout(pooled_output)
-        pair_label_logits = self._classifier(pooled_output)
+        import ipdb
+        ipdb.set_trace()
+
+        # Apply dropout
+        first_vectors_pooled_output = self._dropout(first_vectors_pooled_output)
+        if self._use_comparative_bert:
+            last_vectors_pooled_output = self._dropout(last_vectors_pooled_output)
+
+        # Classify
+        if not self._use_comparative_bert:
+            pair_label_logits = self._classifier(first_vectors_pooled_output)
+        else:
+            if self._use_bilinear_classifier:
+                pair_label_logits = self._classifier(first_vectors_pooled_output, last_vectors_pooled_output)
+            else:
+                import ipdb
+                ipdb.set_trace()
+                all_pooled_output = torch.cat((first_vectors_pooled_output, last_vectors_pooled_output), 1)
+                pair_label_logits = self._classifier(all_pooled_output)
+
         pair_label_logits_flat = pair_label_logits.squeeze(1)
         pair_label_logits = pair_label_logits.view(-1, num_pairs)
 
