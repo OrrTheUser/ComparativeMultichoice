@@ -40,11 +40,14 @@ class BertMCQAModel(Model):
 
         for param in self._bert_model.parameters():
             param.requires_grad = requires_grad
-        #for name, param in self._bert_model.named_parameters():
-        #    grad = requires_grad
-        #    if layer_freeze_regexes and grad:
-        #        grad = not any([bool(re.search(r, name)) for r in layer_freeze_regexes])
-        #    param.requires_grad = grad
+
+        layer_freeze_regexes = ['\.encoder\.']
+
+        for name, param in self._bert_model.named_parameters():
+           grad = requires_grad
+           if layer_freeze_regexes and grad:
+               grad = not any([bool(re.search(r, name)) for r in layer_freeze_regexes])
+           param.requires_grad = grad
 
         bert_config = self._bert_model.config
         self._output_dim = bert_config.hidden_size
