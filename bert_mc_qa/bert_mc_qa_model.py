@@ -81,6 +81,44 @@ class BertMCQAModel(Model):
         #    self._loss = torch.nn.CrossEntropyLoss()
         self._debug = -1
 
+    def _extract_last_token_pooled_output(self, encoded_layers, question_mask):
+        """
+        Extract the output vector for the last token in the sentence -
+            similarly to how pooled_output is extracted for us when calling 'bert_model'.
+        We need the question mask to find the last actual (non-padding) token
+        :return:
+        """
+
+        if self._all_layers:
+            encoded_layers = encoded_layers[-1]
+
+        # A cool trick to extract the last "True" item in each row
+        question_mask = question_mask.squeeze()
+        # We already asserted this at batch_size == 1, but why not
+        assert question_mask.dim() == 2
+        shifted_matrix = question_mask.roll(-1, 1)
+        shifted_matrix[:, -1] = 0
+        last_item_indices = question_mask - shifted_matrix
+
+        # TODO: This row, for some reason, didn't work as expected, but it is much better then the implementation that follows
+        # last_token_tensor = encoded_layers[last_item_indices]
+
+        # TODO: This also doesn't work correctly for some reason
+        num_pairs, token_number, hidden_size = encoded_layers.size()
+        assert last_item_indices.size() == (num_pairs, token_number)
+        # Don't worry, expand doesn't allocate new memory, it simply views the tensor differently
+        expanded_last_item_indices = last_item_indices.unsqueeze(2).expand(num_pairs, token_number, hidden_size)
+        last_token_tensor = encoded_layers.masked_select(expanded_last_item_indices.byte())
+        last_token_tensor = last_token_tensor.reshape(num_pairs, hidden_size)
+
+        pooled_output = self._bert_model.pooler.dense(last_token_tensor)
+        pooled_output = self._bert_model.pooler.activation(pooled_output)
+
+        import ipdb
+        ipdb.set_trace()
+
+        return pooled_output
+
     def forward(self,
                 question: Dict[str, torch.LongTensor],
                 segment_ids: torch.LongTensor = None,
@@ -97,10 +135,20 @@ class BertMCQAModel(Model):
         question_mask = (input_ids != 0).long()
         token_type_ids = torch.zeros_like(input_ids)
 
+        # TODO: How to extract last token pooled output if batch size != 1
+        assert batch_size == 1
+
         encoded_layers, pooled_output = self._bert_model(input_ids=util.combine_initial_dims(input_ids),
                                             token_type_ids=util.combine_initial_dims(token_type_ids),
                                             attention_mask=util.combine_initial_dims(question_mask),
                                             output_all_encoded_layers=self._all_layers)
+
+        import ipdb
+        ipdb.set_trace()
+
+        last_vectors_pooled_output = self._extract_last_token_pooled_output(encoded_layers, question_mask)
+
+        ipdb.set_trace()
 
         if self._all_layers:
             mixed_layer = self._scalar_mix(encoded_layers, question_mask)
