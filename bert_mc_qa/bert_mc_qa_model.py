@@ -171,26 +171,28 @@ class BertMCQAModel(Model):
                 all_pooled_output = torch.cat((first_vectors_pooled_output, last_vectors_pooled_output), 1)
                 pair_label_logits = self._classifier(all_pooled_output)
 
-        pair_label_logits_flat = pair_label_logits.squeeze(1)
         pair_label_logits = pair_label_logits.view(-1, num_pairs)
+
+        pair_label_probs = torch.sigmoid(pair_label_logits)
+        pair_label_probs_flat = pair_label_probs.squeeze(1)
 
         output_dict = {}
         output_dict['pair_label_logits'] = pair_label_logits
         output_dict['choice1_indexes'] = choice1_indexes
         output_dict['choice2_indexes'] = choice2_indexes
 
-        output_dict['pair_label_probs'] = torch.sigmoid(pair_label_logits_flat).view(-1, num_pairs)
+        output_dict['pair_label_probs'] = pair_label_probs_flat.view(-1, num_pairs)
 
         if label is not None:
             label = label.unsqueeze(1)
             label = label.expand(-1, num_pairs)
             relevant_pairs = (choice1_indexes == label) | (choice2_indexes == label)
-            relevant_logits = pair_label_logits[relevant_pairs]
+            relevant_probs = pair_label_probs[relevant_pairs]
             choice1_is_the_label = (choice1_indexes == label)[relevant_pairs]
             # choice1_is_the_label = choice1_is_the_label.type_as(relevant_logits)
 
-            loss = self._loss(relevant_logits, choice1_is_the_label.float())
-            self._accuracy(relevant_logits >= 0.5, choice1_is_the_label)
+            loss = self._loss(relevant_probs, choice1_is_the_label.float())
+            self._accuracy(relevant_probs >= 0.5, choice1_is_the_label)
             output_dict["loss"] = loss
 
         return output_dict
