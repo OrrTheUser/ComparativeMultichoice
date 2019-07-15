@@ -191,7 +191,9 @@ class BertMCQAModel(Model):
             choice1_is_the_label = (choice1_indexes == label)[relevant_pairs]
             # choice1_is_the_label = choice1_is_the_label.type_as(relevant_logits)
 
-            loss = self._loss(relevant_probs, choice1_is_the_label.float())
+            dest_tensor = torch.where(relevant_pairs, (choice1_indexes == label).float(), pair_label_probs)
+
+            loss = self._loss(pair_label_probs, dest_tensor)
             self._accuracy(relevant_probs >= 0.5, choice1_is_the_label)
             output_dict["loss"] = loss
 
