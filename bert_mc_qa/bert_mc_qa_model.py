@@ -137,14 +137,22 @@ class BertMCQAModel(Model):
         # input_ids.size() == (batch_size, num_pairs, max_sentence_length)
         batch_size, num_pairs, _ = question['bert'].size()
         question_mask = (input_ids != 0).long()
-        token_type_ids = torch.zeros_like(input_ids)
+
+        # Segment ids
+        real_segment_ids = question['bert-type-ids'].clone()
+        # Change the last 'SEP' to belong to the second answer (for symmetry)
+        last_seps = (real_segment_ids.roll(-1) == 2) & (real_segment_ids == 1)
+        real_segment_ids[last_seps] = 2
+        # Update segment ids so that they are '1' for answers and '0' for the question
+        real_segment_ids = (real_segment_ids == 0) | (real_segment_ids == 2)
+        real_segment_ids = real_segment_ids.long()
 
         # TODO: How to extract last token pooled output if batch size != 1
         assert batch_size == 1
 
         # Run model
         encoded_layers, first_vectors_pooled_output = self._bert_model(input_ids=util.combine_initial_dims(input_ids),
-                                            token_type_ids=util.combine_initial_dims(token_type_ids),
+                                            token_type_ids=util.combine_initial_dims(real_segment_ids),
                                             attention_mask=util.combine_initial_dims(question_mask),
                                             output_all_encoded_layers=self._all_layers)
 
