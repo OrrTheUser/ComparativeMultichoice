@@ -183,7 +183,7 @@ class BertMCQAReader(DatasetReader):
             assert context is None and all(map(lambda x: x is None, choice_context_list))
             pair_tokens, segment_ids = self.bert_features_from_q_2a(question, choice1, choice2)
             pair_field = TextField(pair_tokens, self._token_indexers)
-            segment_ids_field = SequenceLabelField(segment_ids, pair_field)
+            segment_ids_field = ArrayField(segment_ids, dtype=numpy.int)
             choice1_index_field = LabelField(index1, skip_indexing=True)
             choice2_index_field = LabelField(index2, skip_indexing=True)
             pair_fields.append(pair_field)
@@ -250,7 +250,8 @@ class BertMCQAReader(DatasetReader):
                                                                                 choice2_tokens, self._max_pieces - 2)
 
         tokens = choice1_tokens + [sep_token] + question_tokens + [sep_token] + choice2_tokens
-        segment_ids = list(itertools.repeat(0, len(choice1_tokens) + 1)) +\
-                      list(itertools.repeat(1, len(question_tokens) + 1)) + \
-                      list(itertools.repeat(2, len(choice2_tokens)))
+        segment_ids = list(itertools.repeat(1, len(choice1_tokens) + 2)) +\
+                      list(itertools.repeat(0, len(question_tokens))) + \
+                      list(itertools.repeat(1, len(choice2_tokens) + 2))
+        segment_ids = numpy.array(segment_ids)
         return tokens, segment_ids

@@ -62,29 +62,3 @@ class ComparativePretrainedBertIndexer(WordpieceIndexer):
                          start_tokens=["[CLS]"],
                          end_tokens=["[CLS]"],
                          separator_token="[SEP]")
-
-
-def _get_token_type_ids(wordpiece_ids: List[int],
-                        separator_ids: List[int]) -> List[int]:
-    num_wordpieces = len(wordpiece_ids)
-    token_type_ids: List[int] = []
-    type_id = 0
-    cursor = 0
-    while cursor < num_wordpieces:
-        # check length
-        if num_wordpieces - cursor < len(separator_ids):
-            token_type_ids.extend(type_id
-                                  for _ in range(num_wordpieces - cursor))
-            cursor += num_wordpieces - cursor
-        # check content
-        # when it is a separator
-        elif all(wordpiece_ids[cursor + index] == separator_id
-                 for index, separator_id in enumerate(separator_ids)):
-            token_type_ids.extend(type_id for _ in separator_ids)
-            type_id += 1
-            cursor += len(separator_ids)
-        # when it is not
-        else:
-            cursor += 1
-            token_type_ids.append(type_id)
-    return token_type_ids
