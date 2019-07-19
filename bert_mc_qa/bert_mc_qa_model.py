@@ -137,13 +137,14 @@ class BertMCQAModel(Model):
         # input_ids.size() == (batch_size, num_pairs, max_sentence_length)
         batch_size, num_pairs, _ = question['bert'].size()
         question_mask = (input_ids != 0).long()
+        token_type_ids = torch.zeros_like(input_ids)
 
         # TODO: How to extract last token pooled output if batch size != 1
         assert batch_size == 1
 
         # Run model
         encoded_layers, first_vectors_pooled_output = self._bert_model(input_ids=util.combine_initial_dims(input_ids),
-                                            token_type_ids=util.combine_initial_dims(segment_ids),
+                                            token_type_ids=util.combine_initial_dims(token_type_ids),
                                             attention_mask=util.combine_initial_dims(question_mask),
                                             output_all_encoded_layers=self._all_layers)
 
