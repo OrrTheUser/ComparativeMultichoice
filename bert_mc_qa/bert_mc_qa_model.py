@@ -125,7 +125,6 @@ class BertMCQAModel(Model):
 
     def forward(self,
                 question: Dict[str, torch.LongTensor],
-                segment_ids: torch.LongTensor = None,
                 choice1_indexes: List[int] = None,
                 choice2_indexes: List[int] = None,
                 label: torch.LongTensor = None,

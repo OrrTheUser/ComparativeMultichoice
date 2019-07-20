@@ -171,32 +171,26 @@ class BertMCQAReader(DatasetReader):
         fields: Dict[str, Field] = {}
 
         pair_fields = []
-        #TODO: remove all segment_ids references in this file - they are never referenced (the wordpiece indexer implements "bert-type-ids")
-        segment_ids_fields = []
         pair_tokens_list = []
         choice1_index_fields = []
         choice2_index_fields = []
 
-        for index1, index2 in itertools.combinations(range(len(choice_list)), 2):
+        for index1, index2 in itertools.permutations(range(len(choice_list)), 2):
             choice1, choice2 = (choice_list[index1], choice_list[index2])
             # TODO: What to do if contexts are not none?
             assert context is None and all(map(lambda x: x is None, choice_context_list))
-            pair_tokens, segment_ids = self.bert_features_from_q_2a(question, choice1, choice2)
+            pair_tokens = self.bert_features_from_q_2a(question, choice1, choice2)
             pair_field = TextField(pair_tokens, self._token_indexers)
-            segment_ids_field = SequenceLabelField(segment_ids, pair_field)
             choice1_index_field = LabelField(index1, skip_indexing=True)
             choice2_index_field = LabelField(index2, skip_indexing=True)
             pair_fields.append(pair_field)
             pair_tokens_list.append(pair_tokens)
-            segment_ids_fields.append(segment_ids_field)
             choice1_index_fields.append(choice1_index_field)
             choice2_index_fields.append(choice2_index_field)
             if debug > 0:
                 logger.info(f"qa_tokens = {pair_tokens}")
-                logger.info(f"segment_ids = {segment_ids}")
 
         fields['question'] = ListField(pair_fields)
-        fields['segment_ids'] = ListField(segment_ids_fields)
         fields['choice1_indexes'] = ListField(choice1_index_fields)
         fields['choice2_indexes'] = ListField(choice2_index_fields)
 
@@ -250,7 +244,4 @@ class BertMCQAReader(DatasetReader):
                                                                                 choice2_tokens, self._max_pieces - 2)
 
         tokens = choice1_tokens + [sep_token] + question_tokens + [sep_token] + choice2_tokens
-        segment_ids = list(itertools.repeat(0, len(choice1_tokens) + 1)) +\
-                      list(itertools.repeat(1, len(question_tokens) + 1)) + \
-                      list(itertools.repeat(2, len(choice2_tokens)))
-        return tokens, segment_ids
+        return tokens
