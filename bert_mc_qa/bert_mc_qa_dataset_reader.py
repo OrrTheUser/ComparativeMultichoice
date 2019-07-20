@@ -178,7 +178,9 @@ class BertMCQAReader(DatasetReader):
         for index1, index2 in itertools.permutations(range(len(choice_list)), 2):
             choice1, choice2 = (choice_list[index1], choice_list[index2])
             # TODO: What to do if contexts are not none?
-            assert context is None and all(map(lambda x: x is None, choice_context_list))
+            assert context is None
+            if choice_context_list is not None:
+                assert all(map(lambda x: x is None, choice_context_list))
             pair_tokens = self.bert_features_from_q_2a(question, choice1, choice2)
             pair_field = TextField(pair_tokens, self._token_indexers)
             choice1_index_field = LabelField(index1, skip_indexing=True)
