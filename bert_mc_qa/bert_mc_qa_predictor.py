@@ -44,7 +44,8 @@ class MCQAPredictor(Predictor):
         predicted_answer_label = choice_dict_list[predicted_answer_index]['label']
 
         example = {'username': username, 'pred_answer': predicted_answer_label,'question': question,
-                   'predictions': choice_prob_list, 'choices': choice_dict_list, 'id': item_id}
+                   'predictions': choice_prob_list, 'choices': choice_dict_list, 'id': item_id,
+                   'pair_prob_dict': pair_to_prob_dict}
 
         if 'write_log' in json_dict:
             ElasticLogger().write_log('INFO', 'example', context_dict=example)
