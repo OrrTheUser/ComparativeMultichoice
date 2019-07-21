@@ -31,7 +31,7 @@ class MCQAPredictor(Predictor):
         instance = self._dataset_reader.text_to_instance(item_id, question_text, choice_list)
         predictions = self.predict_instance(instance)
 
-        zipped = zip(predictions['choice1_indexes'], predictions['choice2_indexes'], predictions['pair_label_probs'])
+        zipped = list(zip(predictions['choice1_indexes'], predictions['choice2_indexes'], predictions['pair_label_probs']))
         pair_to_prob_dict = {(i[0], i[1]): i[2] for i in zipped}
         pair_to_prob_dict_str = {str((i[0], i[1])): i[2] for i in zipped}
 
