@@ -33,6 +33,7 @@ class MCQAPredictor(Predictor):
 
         zipped = zip(predictions['choice1_indexes'], predictions['choice2_indexes'], predictions['pair_label_probs'])
         pair_to_prob_dict = {(i[0], i[1]): i[2] for i in zipped}
+        pair_to_prob_dict_str = {str((i[0], i[1])): i[2] for i in zipped}
 
         choice_prob_list = calculate_choice_probs(pair_to_prob_dict)
 
@@ -45,7 +46,7 @@ class MCQAPredictor(Predictor):
 
         example = {'username': username, 'pred_answer': predicted_answer_label,'question': question,
                    'predictions': choice_prob_list, 'choices': choice_dict_list, 'id': item_id,
-                   'pair_prob_dict': pair_to_prob_dict}
+                   'pair_prob_dict': pair_to_prob_dict_str}
 
         if 'write_log' in json_dict:
             ElasticLogger().write_log('INFO', 'example', context_dict=example)
