@@ -99,8 +99,10 @@ class BertMCQAModel(Model):
             self._accuracy = BooleanAccuracy()
             self._loss = torch.nn.BCEWithLogitsLoss()
         else:
-            self._accuracy = CategoricalAccuracy()
-            self._loss = torch.nn.CrossEntropyLoss()
+            # self._accuracy = CategoricalAccuracy()
+            # self._loss = torch.nn.CrossEntropyLoss()
+            self._accuracy = BooleanAccuracy()
+            self._loss = torch.nn.BCEWithLogitsLoss()
         self._debug = -1
 
     def _extract_last_token_pooled_output(self, encoded_layers, question_mask):
@@ -223,14 +225,18 @@ class BertMCQAModel(Model):
             return output_dict
         else:
             choice_label_logits = self._comparison_layer(pair_label_logits)
+            choice_label_logits_flat = choice_label_logits.squeeze(1)
 
             output_dict['choice_label_logits'] = choice_label_logits
-            output_dict['label_probs'] = torch.nn.functional.softmax(choice_label_logits, dim=1)
-            output_dict['answer_index'] = choice_label_logits.argmax(1)
+            output_dict['label_probs'] = torch.sigmoid(choice_label_logits_flat).view(-1, self._num_choices)
+            output_dict['answer_index'] = (choice_label_logits_flat > 0).view(-1, self._num_choices)
 
             if label is not None:
-                loss = self._loss(choice_label_logits, label)
-                self._accuracy(choice_label_logits, label)
+                binary_label = label.new_zeros((len(label), self._num_choices))
+                binary_label.scatter_(1, label.unsqueeze(1), 1.0)
+
+                loss = self._loss(choice_label_logits_flat, binary_label.float())
+                self._accuracy(choice_label_logits_flat > 0, binary_label.byte())
                 output_dict["loss"] = loss
 
             return output_dict
