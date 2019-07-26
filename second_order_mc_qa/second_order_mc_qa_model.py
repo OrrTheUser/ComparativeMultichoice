@@ -16,7 +16,7 @@ import allennlp.nn.util as util
 from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy
 
 
-@Model.register("bert_mc_qa")
+@Model.register("second_order_mc_qa")
 class BertMCQAModel(Model):
     """
     """
@@ -40,8 +40,8 @@ class BertMCQAModel(Model):
         self._layer_2 = Linear(hidden_size, num_choices)
         self._layer_2_activation = torch.nn.Softmax()
 
-        self._accuracy = BooleanAccuracy()
-        self._loss = torch.nn.BCEWithLogitsLoss()
+        self._accuracy = CategoricalAccuracy()
+        self._loss = torch.nn.CrossEntropyLoss()
 
         self._debug = -1
 
@@ -53,7 +53,7 @@ class BertMCQAModel(Model):
         self._debug -= 1
 
         # input_ids.size() == (batch_size, num_pairs, max_sentence_length)
-        batch_size, num_pairs, _ = pair_probs.size()
+        batch_size, num_pairs = pair_probs.size()
 
         #TODO: assert no -1's in pair_probs_field
 
@@ -63,34 +63,15 @@ class BertMCQAModel(Model):
         # TODO: Apply dropout
         # Run model
         choice_logits = self._layer_2(self._layer_1_activation(self._layer_1(pair_probs)))
-
-        import ipdb
-        ipdb.set_trace()
-
-
-
-        pair_label_logits = pair_label_logits.view(-1, num_pairs)
-
-        pair_label_probs = torch.sigmoid(pair_label_logits)
-        pair_label_probs_flat = pair_label_probs.squeeze(1)
-
+        
         output_dict = {}
-        output_dict['pair_label_logits'] = pair_label_logits
-        output_dict['choice1_indexes'] = choice1_indexes
-        output_dict['choice2_indexes'] = choice2_indexes
-
-        output_dict['pair_label_probs'] = pair_label_probs_flat.view(-1, num_pairs)
+        output_dict['choice_logits'] = choice_logits
+        output_dict['choice_probs'] = torch.softmax(choice_logits, 1)
+        output_dict['predicted_choice'] = torch.argmax(choice_logits, 1)
 
         if label is not None:
-            label = label.unsqueeze(1)
-            label = label.expand(-1, num_pairs)
-            relevant_pairs = (choice1_indexes == label) | (choice2_indexes == label)
-            relevant_probs = pair_label_probs[relevant_pairs]
-            choice1_is_the_label = (choice1_indexes == label)[relevant_pairs]
-            # choice1_is_the_label = choice1_is_the_label.type_as(relevant_logits)
-
-            loss = self._loss(relevant_probs, choice1_is_the_label.float())
-            self._accuracy(relevant_probs >= 0.5, choice1_is_the_label)
+            loss = self._loss(choice_logits, label)
+            self._accuracy(choice_logits, label)
             output_dict["loss"] = loss
 
         return output_dict

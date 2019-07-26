@@ -107,7 +107,7 @@ class SecondOrderMCQAReader(DatasetReader):
 
         pair_probs = pair_probs_matrix.flatten()
 
-        fields['pair_probs_field'] = ArrayField(pair_probs, padding_value=-1)
+        fields['pair_probs'] = ArrayField(pair_probs, padding_value=-1)
 
         if answer_id is not None:
             fields['label'] = LabelField(answer_id, skip_indexing=True)

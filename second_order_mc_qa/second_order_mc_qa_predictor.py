@@ -10,7 +10,7 @@ import numpy as np
 
 NUMBER_OF_CHOICES = 5
 
-@Predictor.register('bert_mc_qa')
+@Predictor.register('second_order_mc_qa')
 class MCQAPredictor(Predictor):
     def predict_json(self, json_dict: JsonDict) -> JsonDict:
         if 'id' in json_dict:
