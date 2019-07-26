@@ -48,6 +48,9 @@ class MCQAPredictor(Predictor):
                    'predictions': choice_prob_list, 'choices': choice_dict_list, 'id': item_id,
                    'pair_prob_dict': pair_to_prob_dict_str}
 
+        if 'answerKey' in json_dict:
+            example['gold_answer_key_for_comparisons_only'] = json_dict['answerKey']
+
         if 'write_log' in json_dict:
             ElasticLogger().write_log('INFO', 'example', context_dict=example)
 
