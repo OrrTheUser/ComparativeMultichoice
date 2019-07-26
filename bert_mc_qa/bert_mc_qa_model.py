@@ -225,9 +225,6 @@ class BertMCQAModel(Model):
             return output_dict
         else:
 
-            import ipdb
-            ipdb.set_trace()
-
             choice_label_logits = self._comparison_layer(pair_label_logits)
             choice_label_logits_flat = choice_label_logits.squeeze(1)
             choice_label_probs = torch.nn.functional.softmax(choice_label_logits_flat, dim=1)
