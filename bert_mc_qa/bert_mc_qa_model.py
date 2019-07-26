@@ -32,16 +32,21 @@ class BertMCQAModel(Model):
                  use_comparative_bert: bool = True,
                  use_bilinear_classifier: bool = False,
                  train_comparison_layer: bool = False,
-                 number_of_choices_compared: int = 0) -> None:
+                 number_of_choices_compared: int = 0,
+                 comparison_layer_hidden_size: int = -1,
+                 comparison_layer_use_relu: bool = True) -> None:
         super().__init__(vocab, regularizer)
 
         self._use_comparative_bert = use_comparative_bert
         self._use_bilinear_classifier = use_bilinear_classifier
+        self._train_comparison_layer = train_comparison_layer
         if train_comparison_layer:
             assert number_of_choices_compared > 1
-            self._train_comparison_layer = train_comparison_layer
             self._num_choices = number_of_choices_compared
+            self._comparison_layer_hidden_size = comparison_layer_hidden_size
+            self._comparison_layer_use_relu = comparison_layer_use_relu
 
+        # Bert weights and config
         if bert_weights_model:
             logging.info(f"Loading BERT weights model from {bert_weights_model}")
             bert_model_loaded = load_archive(bert_weights_model)
@@ -62,13 +67,13 @@ class BertMCQAModel(Model):
         self._dropout = torch.nn.Dropout(bert_config.hidden_dropout_prob)
         self._per_choice_loss = per_choice_loss
 
+        # Bert Classifier selector
         final_output_dim = 1
         if not use_comparative_bert:
             if bert_weights_model and hasattr(bert_model_loaded.model, "_classifier"):
                 self._classifier = bert_model_loaded.model._classifier
             else:
                 self._classifier = Linear(self._output_dim, final_output_dim)
-
         else:
             if use_bilinear_classifier:
                 self._classifier = Bilinear(self._output_dim, self._output_dim, final_output_dim)
@@ -76,10 +81,21 @@ class BertMCQAModel(Model):
                 self._classifier = Linear(self._output_dim * 2, final_output_dim)
         self._classifier.apply(self._bert_model.init_bert_weights)
 
+        # Comparison layer setup
         if self._train_comparison_layer:
-            self._comparison_layer = Linear(self._num_choices * (self._num_choices - 1), self._num_choices)
-            self._comparison_layer.apply(self._bert_model.init_bert_weights)
+            number_of_pairs = self._num_choices * (self._num_choices - 1)
+            if self._comparison_layer_hidden_size == -1:
+                self._comparison_layer_hidden_size = number_of_pairs * number_of_pairs
 
+            self._comparison_layer_1 = Linear(number_of_pairs, self._comparison_layer_hidden_size)
+            if self._comparison_layer_use_relu:
+                self._comparison_layer_1_activation = torch.nn.LeakyReLU()
+            else:
+                self._comparison_layer_1_activation = torch.nn.Tanh()
+            self._comparison_layer_2 = Linear(self._comparison_layer_hidden_size, self._num_choices)
+            self._comparison_layer_2_activation = torch.nn.Softmax()
+
+        # Scalar mix, if necessary
         self._all_layers = not top_layer_only
         if self._all_layers:
             if bert_weights_model and hasattr(bert_model_loaded.model, "_scalar_mix") \
@@ -95,14 +111,13 @@ class BertMCQAModel(Model):
         else:
             self._scalar_mix = None
 
-        if not self._train_comparison_layer:
-            self._accuracy = BooleanAccuracy()
-            self._loss = torch.nn.BCEWithLogitsLoss()
-        else:
+        # Accuracy and loss setup
+        if self._train_comparison_layer:
             self._accuracy = CategoricalAccuracy()
             self._loss = torch.nn.CrossEntropyLoss()
-            # self._accuracy = BooleanAccuracy()
-            # self._loss = torch.nn.BCEWithLogitsLoss()
+        else:
+            self._accuracy = BooleanAccuracy()
+            self._loss = torch.nn.BCEWithLogitsLoss()
         self._debug = -1
 
     def _extract_last_token_pooled_output(self, encoded_layers, question_mask):
@@ -224,21 +239,20 @@ class BertMCQAModel(Model):
 
             return output_dict
         else:
+            choice_logits = self._comparison_layer_2(self._comparison_layer_1_activation(self._comparison_layer_1(
+                pair_label_probs)))
 
-            choice_label_logits = self._comparison_layer(pair_label_logits)
-            choice_label_logits_flat = choice_label_logits.squeeze(1)
-            choice_label_probs = torch.nn.functional.softmax(choice_label_logits_flat, dim=1)
-
-            output_dict['choice_label_logits'] = choice_label_logits
-            output_dict['choice_label_probs'] = choice_label_probs.view(-1, self._num_choices)
-            output_dict['answer_index'] = choice_label_logits.argmax(1)
+            output_dict = {}
+            output_dict['choice_logits'] = choice_logits
+            output_dict['choice_probs'] = torch.softmax(choice_logits, 1)
+            output_dict['predicted_choice'] = torch.argmax(choice_logits, 1)
 
             if label is not None:
-                loss = self._loss(choice_label_probs, label)
-                self._accuracy(choice_label_probs, label)
+                loss = self._loss(choice_logits, label)
+                self._accuracy(choice_logits, label)
                 output_dict["loss"] = loss
 
-            return output_dict
+        return output_dict
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         return {
