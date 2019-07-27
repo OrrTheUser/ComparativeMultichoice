@@ -105,7 +105,11 @@ class SecondOrderMCQAReader(DatasetReader):
         for pair in pair_prob_dict:
             pair_probs_matrix[pair] = pair_prob_dict[pair]
 
-        pair_probs = pair_probs_matrix.flatten()
+        real_indexes = numpy.ones((self._num_choices, self._num_choices), dtype=numpy.byte) - \
+            numpy.eye(self._num_choices, dtype=numpy.byte)
+        pair_probs = pair_probs_matrix[real_indexes == 1]
+
+        assert pair_probs.shape == (self._num_choices * (self._num_choices - 1),)
 
         fields['pair_probs'] = ArrayField(pair_probs, padding_value=-1)
 

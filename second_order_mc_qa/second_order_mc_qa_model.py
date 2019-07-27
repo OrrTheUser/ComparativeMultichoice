@@ -27,12 +27,12 @@ class BertMCQAModel(Model):
         super().__init__(None, None)
 
         self._num_choices = num_choices
-        num_choices_squared = num_choices * num_choices
+        num_pairs = num_choices * (num_choices - 1)
         if hidden_size == -1:
-            hidden_size = num_choices_squared * num_choices_squared
+            hidden_size = num_pairs * num_pairs
         self._hidden_size = hidden_size
 
-        self._layer_1 = Linear(num_choices_squared, hidden_size)
+        self._layer_1 = Linear(num_pairs, hidden_size)
         if use_relu:
             self._layer_1_activation = torch.nn.LeakyReLU()
         else:
