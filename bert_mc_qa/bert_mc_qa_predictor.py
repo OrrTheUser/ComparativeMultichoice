@@ -35,12 +35,12 @@ class MCQAPredictor(Predictor):
         pair_to_prob_dict = {(i[0], i[1]): i[2] for i in zipped}
         pair_to_prob_dict_str = {str((i[0], i[1])): i[2] for i in zipped}
 
-        choice_prob_list = calculate_choice_probs(pair_to_prob_dict)
-
-        predicted_answer_index = np.argmax(choice_prob_list)
-        # sorted_predictions = sorted(choice_prob_list, reverse = True)
-        # if sorted_predictions[0] - sorted_predictions[1] < 0.03:
-        #    predicted_answer = "I'm not sure"
+        if 'choice_probs' in predictions:
+            choice_prob_list = predictions['choice_probs']
+            predicted_answer_index = predictions['predicted_choice']
+        else:
+            choice_prob_list = calculate_choice_probs(pair_to_prob_dict)
+            predicted_answer_index = np.argmax(choice_prob_list)
 
         predicted_answer_label = choice_dict_list[predicted_answer_index]['label']
 

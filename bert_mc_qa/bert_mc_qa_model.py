@@ -217,14 +217,13 @@ class BertMCQAModel(Model):
         pair_label_probs = torch.sigmoid(pair_label_logits)
 
         output_dict = {}
+        pair_label_probs_flat = pair_label_probs.squeeze(1)
+        output_dict['pair_label_probs'] = pair_label_probs_flat.view(-1, num_pairs)
+        output_dict['pair_label_logits'] = pair_label_logits
+        output_dict['choice1_indexes'] = choice1_indexes
+        output_dict['choice2_indexes'] = choice2_indexes
+
         if not self._train_comparison_layer:
-            output_dict['pair_label_logits'] = pair_label_logits
-            output_dict['choice1_indexes'] = choice1_indexes
-            output_dict['choice2_indexes'] = choice2_indexes
-
-            pair_label_probs_flat = pair_label_probs.squeeze(1)
-            output_dict['pair_label_probs'] = pair_label_probs_flat.view(-1, num_pairs)
-
             if label is not None:
                 label = label.unsqueeze(1)
                 label = label.expand(-1, num_pairs)
@@ -241,8 +240,6 @@ class BertMCQAModel(Model):
         else:
             choice_logits = self._comparison_layer_2(self._comparison_layer_1_activation(self._comparison_layer_1(
                 pair_label_probs)))
-
-            output_dict = {}
             output_dict['choice_logits'] = choice_logits
             output_dict['choice_probs'] = torch.softmax(choice_logits, 1)
             output_dict['predicted_choice'] = torch.argmax(choice_logits, 1)
