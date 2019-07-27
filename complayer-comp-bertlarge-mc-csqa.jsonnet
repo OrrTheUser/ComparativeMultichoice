@@ -1,9 +1,9 @@
 local train_size = 9741;
 local batch_size = 1;
 local grad_accumulate = 1;
-local num_epochs = 1;
-local lr = 0.000003;
-local warmup = 0.1;
+local num_epochs = 2;
+local lr = 0.0000005;
+local warmup = 0.05;
 local bert_model = "bert-large-uncased";
 
 {
