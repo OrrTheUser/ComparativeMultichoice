@@ -30,12 +30,23 @@ class BertMCQAModel(Model):
                  layer_freeze_regexes: List[str] = None,
                  regularizer: Optional[RegularizerApplicator] = None,
                  use_comparative_bert: bool = True,
-                 use_bilinear_classifier: bool = False) -> None:
+                 use_bilinear_classifier: bool = False,
+                 train_comparison_layer: bool = False,
+                 number_of_choices_compared: int = 0,
+                 comparison_layer_hidden_size: int = -1,
+                 comparison_layer_use_relu: bool = True) -> None:
         super().__init__(vocab, regularizer)
 
         self._use_comparative_bert = use_comparative_bert
         self._use_bilinear_classifier = use_bilinear_classifier
+        self._train_comparison_layer = train_comparison_layer
+        if train_comparison_layer:
+            assert number_of_choices_compared > 1
+            self._num_choices = number_of_choices_compared
+            self._comparison_layer_hidden_size = comparison_layer_hidden_size
+            self._comparison_layer_use_relu = comparison_layer_use_relu
 
+        # Bert weights and config
         if bert_weights_model:
             logging.info(f"Loading BERT weights model from {bert_weights_model}")
             bert_model_loaded = load_archive(bert_weights_model)
@@ -56,13 +67,13 @@ class BertMCQAModel(Model):
         self._dropout = torch.nn.Dropout(bert_config.hidden_dropout_prob)
         self._per_choice_loss = per_choice_loss
 
+        # Bert Classifier selector
         final_output_dim = 1
         if not use_comparative_bert:
             if bert_weights_model and hasattr(bert_model_loaded.model, "_classifier"):
                 self._classifier = bert_model_loaded.model._classifier
             else:
                 self._classifier = Linear(self._output_dim, final_output_dim)
-
         else:
             if use_bilinear_classifier:
                 self._classifier = Bilinear(self._output_dim, self._output_dim, final_output_dim)
@@ -70,6 +81,21 @@ class BertMCQAModel(Model):
                 self._classifier = Linear(self._output_dim * 2, final_output_dim)
         self._classifier.apply(self._bert_model.init_bert_weights)
 
+        # Comparison layer setup
+        if self._train_comparison_layer:
+            number_of_pairs = self._num_choices * (self._num_choices - 1)
+            if self._comparison_layer_hidden_size == -1:
+                self._comparison_layer_hidden_size = number_of_pairs * number_of_pairs
+
+            self._comparison_layer_1 = Linear(number_of_pairs, self._comparison_layer_hidden_size)
+            if self._comparison_layer_use_relu:
+                self._comparison_layer_1_activation = torch.nn.LeakyReLU()
+            else:
+                self._comparison_layer_1_activation = torch.nn.Tanh()
+            self._comparison_layer_2 = Linear(self._comparison_layer_hidden_size, self._num_choices)
+            self._comparison_layer_2_activation = torch.nn.Softmax()
+
+        # Scalar mix, if necessary
         self._all_layers = not top_layer_only
         if self._all_layers:
             if bert_weights_model and hasattr(bert_model_loaded.model, "_scalar_mix") \
@@ -85,8 +111,13 @@ class BertMCQAModel(Model):
         else:
             self._scalar_mix = None
 
-        self._accuracy = BooleanAccuracy()
-        self._loss = torch.nn.BCEWithLogitsLoss()
+        # Accuracy and loss setup
+        if self._train_comparison_layer:
+            self._accuracy = CategoricalAccuracy()
+            self._loss = torch.nn.CrossEntropyLoss()
+        else:
+            self._accuracy = BooleanAccuracy()
+            self._loss = torch.nn.BCEWithLogitsLoss()
         self._debug = -1
 
     def _extract_last_token_pooled_output(self, encoded_layers, question_mask):
@@ -125,7 +156,6 @@ class BertMCQAModel(Model):
 
     def forward(self,
                 question: Dict[str, torch.LongTensor],
-                segment_ids: torch.LongTensor = None,
                 choice1_indexes: List[int] = None,
                 choice2_indexes: List[int] = None,
                 label: torch.LongTensor = None,
@@ -137,6 +167,9 @@ class BertMCQAModel(Model):
         # input_ids.size() == (batch_size, num_pairs, max_sentence_length)
         batch_size, num_pairs, _ = question['bert'].size()
         question_mask = (input_ids != 0).long()
+
+        if self._train_comparison_layer:
+            assert num_pairs == self._num_choices * (self._num_choices - 1)
 
         # Segment ids
         real_segment_ids = question['bert-type-ids'].clone()
@@ -182,26 +215,39 @@ class BertMCQAModel(Model):
         pair_label_logits = pair_label_logits.view(-1, num_pairs)
 
         pair_label_probs = torch.sigmoid(pair_label_logits)
-        pair_label_probs_flat = pair_label_probs.squeeze(1)
 
         output_dict = {}
+        pair_label_probs_flat = pair_label_probs.squeeze(1)
+        output_dict['pair_label_probs'] = pair_label_probs_flat.view(-1, num_pairs)
         output_dict['pair_label_logits'] = pair_label_logits
         output_dict['choice1_indexes'] = choice1_indexes
         output_dict['choice2_indexes'] = choice2_indexes
 
-        output_dict['pair_label_probs'] = pair_label_probs_flat.view(-1, num_pairs)
+        if not self._train_comparison_layer:
+            if label is not None:
+                label = label.unsqueeze(1)
+                label = label.expand(-1, num_pairs)
+                relevant_pairs = (choice1_indexes == label) | (choice2_indexes == label)
+                relevant_probs = pair_label_probs[relevant_pairs]
+                choice1_is_the_label = (choice1_indexes == label)[relevant_pairs]
+                # choice1_is_the_label = choice1_is_the_label.type_as(relevant_logits)
 
-        if label is not None:
-            label = label.unsqueeze(1)
-            label = label.expand(-1, num_pairs)
-            relevant_pairs = (choice1_indexes == label) | (choice2_indexes == label)
-            relevant_probs = pair_label_probs[relevant_pairs]
-            choice1_is_the_label = (choice1_indexes == label)[relevant_pairs]
-            # choice1_is_the_label = choice1_is_the_label.type_as(relevant_logits)
+                loss = self._loss(relevant_probs, choice1_is_the_label.float())
+                self._accuracy(relevant_probs >= 0.5, choice1_is_the_label)
+                output_dict["loss"] = loss
 
-            loss = self._loss(relevant_probs, choice1_is_the_label.float())
-            self._accuracy(relevant_probs >= 0.5, choice1_is_the_label)
-            output_dict["loss"] = loss
+            return output_dict
+        else:
+            choice_logits = self._comparison_layer_2(self._comparison_layer_1_activation(self._comparison_layer_1(
+                pair_label_probs)))
+            output_dict['choice_logits'] = choice_logits
+            output_dict['choice_probs'] = torch.softmax(choice_logits, 1)
+            output_dict['predicted_choice'] = torch.argmax(choice_logits, 1)
+
+            if label is not None:
+                loss = self._loss(choice_logits, label)
+                self._accuracy(choice_logits, label)
+                output_dict["loss"] = loss
 
         return output_dict
 
